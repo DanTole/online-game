@@ -1,22 +1,32 @@
 import { Request, Response } from 'express';
 import { Lobby, ILobby } from '../models/Lobby';
 import { User, IUser } from '../models/User';
+import { Types, Document } from 'mongoose';
 
 interface AuthRequest extends Request {
-  user?: IUser;
+  user?: IUser & { _id: Types.ObjectId };
+}
+
+interface PopulatedLobby extends ILobby {
+  host: Types.ObjectId;
+  currentPlayers: Types.ObjectId[];
 }
 
 export const createLobby = async (req: AuthRequest, res: Response) => {
   try {
     const { name, maxPlayers, gameType, settings } = req.body;
     
+    if (!req.user?._id) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
+
     const lobby = new Lobby({
       name,
-      host: req.user?._id,
+      host: req.user._id,
       maxPlayers,
       gameType,
       settings,
-      currentPlayers: [req.user?._id]
+      currentPlayers: [req.user._id]
     });
 
     await lobby.save();
@@ -62,7 +72,11 @@ export const getLobby = async (req: Request, res: Response) => {
 
 export const joinLobby = async (req: AuthRequest, res: Response) => {
   try {
-    const lobby = await Lobby.findById(req.params.id);
+    if (!req.user?._id) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
+
+    const lobby = await Lobby.findById(req.params.id) as PopulatedLobby;
     
     if (!lobby) {
       return res.status(404).json({ error: 'Lobby not found' });
@@ -72,7 +86,8 @@ export const joinLobby = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'Lobby is not accepting players' });
     }
 
-    if (lobby.currentPlayers.includes(req.user?._id)) {
+    const userId = req.user._id;
+    if (lobby.currentPlayers.some((player: Types.ObjectId) => player.equals(userId))) {
       return res.status(400).json({ error: 'Already in lobby' });
     }
 
@@ -80,7 +95,7 @@ export const joinLobby = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'Lobby is full' });
     }
 
-    lobby.currentPlayers.push(req.user?._id);
+    lobby.currentPlayers.push(userId);
     await lobby.save();
 
     res.json(lobby);
@@ -91,23 +106,26 @@ export const joinLobby = async (req: AuthRequest, res: Response) => {
 
 export const leaveLobby = async (req: AuthRequest, res: Response) => {
   try {
-    const lobby = await Lobby.findById(req.params.id);
+    if (!req.user?._id) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
+
+    const lobby = await Lobby.findById(req.params.id) as PopulatedLobby;
     
     if (!lobby) {
       return res.status(404).json({ error: 'Lobby not found' });
     }
 
-    if (!lobby.currentPlayers.includes(req.user?._id)) {
+    const userId = req.user._id;
+    if (!lobby.currentPlayers.some((player: Types.ObjectId) => player.equals(userId))) {
       return res.status(400).json({ error: 'Not in lobby' });
     }
 
     // If host leaves, assign new host or delete lobby
-    if (lobby.host.toString() === req.user?._id.toString()) {
+    if (lobby.host.equals(userId)) {
       if (lobby.currentPlayers.length > 1) {
         // Assign new host
-        const newHost = lobby.currentPlayers.find(player => 
-          player.toString() !== req.user?._id.toString()
-        );
+        const newHost = lobby.currentPlayers.find((player: Types.ObjectId) => !player.equals(userId));
         if (newHost) {
           lobby.host = newHost;
         }
@@ -119,7 +137,7 @@ export const leaveLobby = async (req: AuthRequest, res: Response) => {
     }
 
     lobby.currentPlayers = lobby.currentPlayers.filter(
-      player => player.toString() !== req.user?._id.toString()
+      (player: Types.ObjectId) => !player.equals(userId)
     );
     await lobby.save();
 
@@ -131,13 +149,17 @@ export const leaveLobby = async (req: AuthRequest, res: Response) => {
 
 export const startGame = async (req: AuthRequest, res: Response) => {
   try {
-    const lobby = await Lobby.findById(req.params.id);
+    if (!req.user?._id) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
+
+    const lobby = await Lobby.findById(req.params.id) as PopulatedLobby;
     
     if (!lobby) {
       return res.status(404).json({ error: 'Lobby not found' });
     }
 
-    if (lobby.host.toString() !== req.user?._id.toString()) {
+    if (!lobby.host.equals(req.user._id)) {
       return res.status(403).json({ error: 'Only host can start the game' });
     }
 
