@@ -9,6 +9,7 @@ import { errorHandler } from './middleware/errorHandler';
 import { logger } from './middleware/logger';
 import userRoutes from './routes/userRoutes';
 import lobbyRoutes from './routes/lobbyRoutes';
+import gameSessionRoutes from './routes/gameSessionRoutes';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 
 // Load environment variables
@@ -33,6 +34,7 @@ app.use(logger);
 // Routes
 app.use('/api/users', userRoutes);
 app.use('/api/lobbies', lobbyRoutes);
+app.use('/api/game-sessions', gameSessionRoutes);
 
 // Redis connection
 let redis: Redis | null = null;

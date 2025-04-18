@@ -1,13 +1,7 @@
 import { Request, Response } from 'express';
 import { Lobby, LobbyDocument, PlayerState } from '../models/Lobby';
 import { Types } from 'mongoose';
-
-interface AuthRequest extends Request {
-  user?: {
-    _id: Types.ObjectId;
-    username: string;
-  };
-}
+import { AuthRequest } from '../middleware/auth';
 
 interface PopulatedLobby {
   _id: Types.ObjectId;
@@ -16,6 +10,8 @@ interface PopulatedLobby {
   maxPlayers: number;
   currentPlayers: PlayerState[];
   isPrivate: boolean;
+  password?: string;
+  gameType: string;
   status: 'waiting' | 'playing' | 'finished';
   createdAt: Date;
   updatedAt: Date;
@@ -29,6 +25,8 @@ const toLeanLobby = (doc: LobbyDocument): PopulatedLobby => ({
   maxPlayers: doc.maxPlayers,
   currentPlayers: doc.currentPlayers,
   isPrivate: doc.isPrivate,
+  password: doc.password,
+  gameType: doc.gameType,
   status: doc.status,
   createdAt: doc.createdAt,
   updatedAt: doc.updatedAt
@@ -36,163 +34,150 @@ const toLeanLobby = (doc: LobbyDocument): PopulatedLobby => ({
 
 export const createLobby = async (req: AuthRequest, res: Response) => {
   try {
+    const { name, maxPlayers, isPrivate, password, gameType } = req.body;
+
     if (!req.user) {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    const { name, maxPlayers, isPrivate, password } = req.body;
-
-    const lobby = await Lobby.create({
+    const lobby = new Lobby({
       name,
       host: req.user._id,
       maxPlayers,
       isPrivate,
       password,
+      gameType,
+      players: [req.user._id],
       currentPlayers: [{
         playerId: req.user._id,
-        username: req.user.username,
+        username: req.body.username,
         isReady: false,
         joinedAt: new Date()
       }]
     });
 
+    await lobby.save();
     res.status(201).json(toLeanLobby(lobby));
   } catch (error) {
-    res.status(400).json({ message: 'Error creating lobby', error });
+    console.error('Error creating lobby:', error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
 export const getLobbies = async (req: Request, res: Response) => {
   try {
-    const lobbies = await Lobby.find({ status: 'waiting' })
-      .select('-password')
-      .lean();
-    res.json(lobbies);
+    const lobbies = await Lobby.find({ status: 'waiting' });
+    res.json(lobbies.map(toLeanLobby));
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching lobbies', error });
+    console.error('Error getting lobbies:', error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
 export const getLobby = async (req: Request, res: Response) => {
   try {
-    const lobby = await Lobby.findById(req.params.id)
-      .select('-password')
-      .lean();
-    
+    const { lobbyId } = req.params;
+    const lobby = await Lobby.findById(lobbyId);
+
     if (!lobby) {
       return res.status(404).json({ message: 'Lobby not found' });
     }
-    
-    res.json(lobby);
+
+    res.json(toLeanLobby(lobby));
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching lobby', error });
+    console.error('Error getting lobby:', error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
 export const joinLobby = async (req: AuthRequest, res: Response) => {
   try {
+    const { lobbyId } = req.params;
+    const { password } = req.body;
+
     if (!req.user) {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    const { password } = req.body;
-    const lobby = await Lobby.findById(req.params.id);
-
+    const lobby = await Lobby.findById(lobbyId);
     if (!lobby) {
       return res.status(404).json({ message: 'Lobby not found' });
     }
 
-    if (lobby.isPrivate && lobby.password !== password) {
-      return res.status(403).json({ message: 'Invalid password' });
-    }
-
-    if (!lobby.canJoin(req.user._id)) {
+    if (!lobby.canJoin(req.user._id, password)) {
       return res.status(400).json({ message: 'Cannot join lobby' });
     }
 
-    const success = lobby.addPlayer(req.user._id, req.user.username);
-    if (!success) {
-      return res.status(400).json({ message: 'Failed to join lobby' });
-    }
-
-    await lobby.save();
+    await lobby.addPlayer(req.user._id, req.body.username);
     res.json(toLeanLobby(lobby));
   } catch (error) {
-    res.status(500).json({ message: 'Error joining lobby', error });
+    console.error('Error joining lobby:', error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
 export const leaveLobby = async (req: AuthRequest, res: Response) => {
   try {
+    const { lobbyId } = req.params;
+
     if (!req.user) {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    const lobby = await Lobby.findById(req.params.id);
+    const lobby = await Lobby.findById(lobbyId);
     if (!lobby) {
       return res.status(404).json({ message: 'Lobby not found' });
     }
 
-    const success = lobby.removePlayer(req.user._id);
-    if (!success) {
-      return res.status(400).json({ message: 'Failed to leave lobby' });
-    }
-
-    // If no players left, delete the lobby
-    if (lobby.currentPlayers.length === 0) {
-      await lobby.deleteOne();
-      return res.json({ message: 'Lobby deleted' });
-    }
-
-    // If host left, assign new host
-    if (lobby.host.equals(req.user._id)) {
-      lobby.host = lobby.currentPlayers[0].playerId;
-    }
-
-    await lobby.save();
-    res.json(toLeanLobby(lobby));
+    await lobby.removePlayer(req.user._id);
+    res.json({ message: 'Successfully left lobby' });
   } catch (error) {
-    res.status(500).json({ message: 'Error leaving lobby', error });
+    console.error('Error leaving lobby:', error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
 export const toggleReady = async (req: AuthRequest, res: Response) => {
   try {
+    const { lobbyId } = req.params;
+
     if (!req.user) {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    const lobby = await Lobby.findById(req.params.id);
+    const lobby = await Lobby.findById(lobbyId);
     if (!lobby) {
       return res.status(404).json({ message: 'Lobby not found' });
     }
 
     const success = lobby.togglePlayerReady(req.user._id);
     if (!success) {
-      return res.status(400).json({ message: 'Failed to toggle ready state' });
+      return res.status(400).json({ message: 'Failed to toggle ready status' });
     }
 
     await lobby.save();
     res.json(toLeanLobby(lobby));
   } catch (error) {
-    res.status(500).json({ message: 'Error toggling ready state', error });
+    console.error('Error toggling ready status:', error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
 export const startGame = async (req: AuthRequest, res: Response) => {
   try {
+    const { lobbyId } = req.params;
+
     if (!req.user) {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    const lobby = await Lobby.findById(req.params.id);
+    const lobby = await Lobby.findById(lobbyId);
     if (!lobby) {
       return res.status(404).json({ message: 'Lobby not found' });
     }
 
-    // Only host can start the game
     if (!lobby.host.equals(req.user._id)) {
-      return res.status(403).json({ message: 'Only host can start the game' });
+      return res.status(403).json({ message: 'Only the host can start the game' });
     }
 
     const success = lobby.startGame();
@@ -203,7 +188,8 @@ export const startGame = async (req: AuthRequest, res: Response) => {
     await lobby.save();
     res.json(toLeanLobby(lobby));
   } catch (error) {
-    res.status(500).json({ message: 'Error starting game', error });
+    console.error('Error starting game:', error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
