@@ -14,11 +14,11 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:4001',
+        target: 'http://localhost:4002',
         changeOrigin: true,
       },
       '/socket.io': {
-        target: 'http://localhost:4001',
+        target: 'http://localhost:4002',
         ws: true,
       },
     },

@@ -1,74 +1,94 @@
-import mongoose from 'mongoose';
+import { Schema, model, Document, Types, Model } from 'mongoose';
 import { IUser } from './User';
 
-export interface ILobby extends mongoose.Document {
+export interface PlayerState {
+  playerId: Types.ObjectId;
+  username: string;
+  isReady: boolean;
+  joinedAt: Date;
+}
+
+export interface ILobby {
   name: string;
-  host: IUser['_id'];
+  host: Types.ObjectId;
   maxPlayers: number;
-  currentPlayers: IUser['_id'][];
+  currentPlayers: PlayerState[];
+  isPrivate: boolean;
+  password?: string;
   status: 'waiting' | 'playing' | 'finished';
-  gameType: string;
-  settings: {
-    [key: string]: any;
-  };
   createdAt: Date;
   updatedAt: Date;
 }
 
-const lobbySchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: true,
-    trim: true,
-    minlength: 3,
-    maxlength: 30
-  },
-  host: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  maxPlayers: {
-    type: Number,
-    required: true,
-    min: 2,
-    max: 8,
-    default: 4
-  },
+export interface LobbyMethods {
+  canJoin(playerId: Types.ObjectId): boolean;
+  addPlayer(playerId: Types.ObjectId, username: string): boolean;
+  removePlayer(playerId: Types.ObjectId): boolean;
+  togglePlayerReady(playerId: Types.ObjectId): boolean;
+  startGame(): boolean;
+  endGame(): void;
+}
+
+export interface LobbyModel extends Model<ILobby, {}, LobbyMethods> {}
+
+export type LobbyDocument = Document<Types.ObjectId, {}, ILobby> & ILobby & LobbyMethods;
+
+const lobbySchema = new Schema<ILobby, LobbyModel, LobbyMethods>({
+  name: { type: String, required: true },
+  host: { type: Schema.Types.ObjectId, required: true, ref: 'User' },
+  maxPlayers: { type: Number, required: true, min: 2, max: 8 },
   currentPlayers: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
+    playerId: { type: Schema.Types.ObjectId, required: true },
+    username: { type: String, required: true },
+    isReady: { type: Boolean, default: false },
+    joinedAt: { type: Date, default: Date.now }
   }],
-  status: {
-    type: String,
-    enum: ['waiting', 'playing', 'finished'],
-    default: 'waiting'
-  },
-  gameType: {
-    type: String,
-    required: true,
-    enum: ['chess', 'checkers', 'tic-tac-toe'] // Add more game types as needed
-  },
-  settings: {
-    type: Map,
-    of: mongoose.Schema.Types.Mixed,
-    default: {}
-  }
-}, {
-  timestamps: true
-});
+  isPrivate: { type: Boolean, default: false },
+  password: { type: String },
+  status: { type: String, enum: ['waiting', 'playing', 'finished'], default: 'waiting' }
+}, { timestamps: true });
 
-// Index for faster queries
-lobbySchema.index({ status: 1, gameType: 1 });
-lobbySchema.index({ host: 1 });
-lobbySchema.index({ currentPlayers: 1 });
+lobbySchema.methods.canJoin = function(playerId: Types.ObjectId): boolean {
+  if (this.status !== 'waiting') return false;
+  if (this.currentPlayers.length >= this.maxPlayers) return false;
+  return !this.currentPlayers.some((p: PlayerState) => p.playerId.equals(playerId));
+};
 
-// Validate max players
-lobbySchema.pre('save', function(next) {
-  if (this.currentPlayers.length > this.maxPlayers) {
-    throw new Error('Cannot exceed maximum number of players');
-  }
-  next();
-});
+lobbySchema.methods.addPlayer = function(playerId: Types.ObjectId, username: string): boolean {
+  if (!this.canJoin(playerId)) return false;
+  this.currentPlayers.push({
+    playerId,
+    username,
+    isReady: false,
+    joinedAt: new Date()
+  });
+  return true;
+};
 
-export const Lobby = mongoose.model<ILobby>('Lobby', lobbySchema); 
+lobbySchema.methods.removePlayer = function(playerId: Types.ObjectId): boolean {
+  const index = this.currentPlayers.findIndex((p: PlayerState) => p.playerId.equals(playerId));
+  if (index === -1) return false;
+  this.currentPlayers.splice(index, 1);
+  return true;
+};
+
+lobbySchema.methods.togglePlayerReady = function(playerId: Types.ObjectId): boolean {
+  const player = this.currentPlayers.find((p: PlayerState) => p.playerId.equals(playerId));
+  if (!player) return false;
+  player.isReady = !player.isReady;
+  return true;
+};
+
+lobbySchema.methods.startGame = function(): boolean {
+  if (this.status !== 'waiting') return false;
+  if (this.currentPlayers.length < 2) return false;
+  if (!this.currentPlayers.every((p: PlayerState) => p.isReady)) return false;
+  this.status = 'playing';
+  return true;
+};
+
+lobbySchema.methods.endGame = function(): void {
+  this.status = 'finished';
+};
+
+export const Lobby = model<ILobby, LobbyModel>('Lobby', lobbySchema); 

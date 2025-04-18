@@ -1,181 +1,232 @@
 import { Request, Response } from 'express';
-import { Lobby, ILobby } from '../models/Lobby';
-import { User, IUser } from '../models/User';
-import { Types, Document } from 'mongoose';
+import { Lobby, LobbyDocument, PlayerState } from '../models/Lobby';
+import { Types } from 'mongoose';
 
 interface AuthRequest extends Request {
-  user?: IUser & { _id: Types.ObjectId };
+  user?: {
+    _id: Types.ObjectId;
+    username: string;
+  };
 }
 
-interface PopulatedLobby extends ILobby {
+interface PopulatedLobby {
+  _id: Types.ObjectId;
+  name: string;
   host: Types.ObjectId;
-  currentPlayers: Types.ObjectId[];
+  maxPlayers: number;
+  currentPlayers: PlayerState[];
+  isPrivate: boolean;
+  status: 'waiting' | 'playing' | 'finished';
+  createdAt: Date;
+  updatedAt: Date;
 }
+
+// Helper function to convert Mongoose document to lean lobby object
+const toLeanLobby = (doc: LobbyDocument): PopulatedLobby => ({
+  _id: doc._id,
+  name: doc.name,
+  host: doc.host,
+  maxPlayers: doc.maxPlayers,
+  currentPlayers: doc.currentPlayers,
+  isPrivate: doc.isPrivate,
+  status: doc.status,
+  createdAt: doc.createdAt,
+  updatedAt: doc.updatedAt
+});
 
 export const createLobby = async (req: AuthRequest, res: Response) => {
   try {
-    const { name, maxPlayers, gameType, settings } = req.body;
-    
-    if (!req.user?._id) {
-      return res.status(401).json({ error: 'User not authenticated' });
+    if (!req.user) {
+      return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    const lobby = new Lobby({
+    const { name, maxPlayers, isPrivate, password } = req.body;
+
+    const lobby = await Lobby.create({
       name,
       host: req.user._id,
       maxPlayers,
-      gameType,
-      settings,
-      currentPlayers: [req.user._id]
+      isPrivate,
+      password,
+      currentPlayers: [{
+        playerId: req.user._id,
+        username: req.user.username,
+        isReady: false,
+        joinedAt: new Date()
+      }]
     });
 
-    await lobby.save();
-    res.status(201).json(lobby);
+    res.status(201).json(toLeanLobby(lobby));
   } catch (error) {
-    res.status(400).json({ error: 'Failed to create lobby' });
+    res.status(400).json({ message: 'Error creating lobby', error });
   }
 };
 
 export const getLobbies = async (req: Request, res: Response) => {
   try {
-    const { gameType, status } = req.query;
-    const query: any = {};
-
-    if (gameType) query.gameType = gameType;
-    if (status) query.status = status;
-
-    const lobbies = await Lobby.find(query)
-      .populate('host', 'username displayName avatar')
-      .populate('currentPlayers', 'username displayName avatar');
-    
+    const lobbies = await Lobby.find({ status: 'waiting' })
+      .select('-password')
+      .lean();
     res.json(lobbies);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch lobbies' });
+    res.status(500).json({ message: 'Error fetching lobbies', error });
   }
 };
 
 export const getLobby = async (req: Request, res: Response) => {
   try {
     const lobby = await Lobby.findById(req.params.id)
-      .populate('host', 'username displayName avatar')
-      .populate('currentPlayers', 'username displayName avatar');
+      .select('-password')
+      .lean();
     
     if (!lobby) {
-      return res.status(404).json({ error: 'Lobby not found' });
+      return res.status(404).json({ message: 'Lobby not found' });
     }
     
     res.json(lobby);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch lobby' });
+    res.status(500).json({ message: 'Error fetching lobby', error });
   }
 };
 
 export const joinLobby = async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user?._id) {
-      return res.status(401).json({ error: 'User not authenticated' });
+    if (!req.user) {
+      return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    const lobby = await Lobby.findById(req.params.id) as PopulatedLobby;
-    
+    const { password } = req.body;
+    const lobby = await Lobby.findById(req.params.id);
+
     if (!lobby) {
-      return res.status(404).json({ error: 'Lobby not found' });
+      return res.status(404).json({ message: 'Lobby not found' });
     }
 
-    if (lobby.status !== 'waiting') {
-      return res.status(400).json({ error: 'Lobby is not accepting players' });
+    if (lobby.isPrivate && lobby.password !== password) {
+      return res.status(403).json({ message: 'Invalid password' });
     }
 
-    const userId = req.user._id;
-    if (lobby.currentPlayers.some((player: Types.ObjectId) => player.equals(userId))) {
-      return res.status(400).json({ error: 'Already in lobby' });
+    if (!lobby.canJoin(req.user._id)) {
+      return res.status(400).json({ message: 'Cannot join lobby' });
     }
 
-    if (lobby.currentPlayers.length >= lobby.maxPlayers) {
-      return res.status(400).json({ error: 'Lobby is full' });
+    const success = lobby.addPlayer(req.user._id, req.user.username);
+    if (!success) {
+      return res.status(400).json({ message: 'Failed to join lobby' });
     }
 
-    lobby.currentPlayers.push(userId);
     await lobby.save();
-
-    res.json(lobby);
+    res.json(toLeanLobby(lobby));
   } catch (error) {
-    res.status(400).json({ error: 'Failed to join lobby' });
+    res.status(500).json({ message: 'Error joining lobby', error });
   }
 };
 
 export const leaveLobby = async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user?._id) {
-      return res.status(401).json({ error: 'User not authenticated' });
+    if (!req.user) {
+      return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    const lobby = await Lobby.findById(req.params.id) as PopulatedLobby;
-    
+    const lobby = await Lobby.findById(req.params.id);
     if (!lobby) {
-      return res.status(404).json({ error: 'Lobby not found' });
+      return res.status(404).json({ message: 'Lobby not found' });
     }
 
-    const userId = req.user._id;
-    if (!lobby.currentPlayers.some((player: Types.ObjectId) => player.equals(userId))) {
-      return res.status(400).json({ error: 'Not in lobby' });
+    const success = lobby.removePlayer(req.user._id);
+    if (!success) {
+      return res.status(400).json({ message: 'Failed to leave lobby' });
     }
 
-    // If host leaves, assign new host or delete lobby
-    if (lobby.host.equals(userId)) {
-      if (lobby.currentPlayers.length > 1) {
-        // Assign new host
-        const newHost = lobby.currentPlayers.find((player: Types.ObjectId) => !player.equals(userId));
-        if (newHost) {
-          lobby.host = newHost;
-        }
-      } else {
-        // Delete lobby if no players left
-        await lobby.deleteOne();
-        return res.json({ message: 'Lobby deleted' });
-      }
+    // If no players left, delete the lobby
+    if (lobby.currentPlayers.length === 0) {
+      await lobby.deleteOne();
+      return res.json({ message: 'Lobby deleted' });
     }
 
-    lobby.currentPlayers = lobby.currentPlayers.filter(
-      (player: Types.ObjectId) => !player.equals(userId)
-    );
+    // If host left, assign new host
+    if (lobby.host.equals(req.user._id)) {
+      lobby.host = lobby.currentPlayers[0].playerId;
+    }
+
     await lobby.save();
-
-    res.json(lobby);
+    res.json(toLeanLobby(lobby));
   } catch (error) {
-    res.status(400).json({ error: 'Failed to leave lobby' });
+    res.status(500).json({ message: 'Error leaving lobby', error });
+  }
+};
+
+export const toggleReady = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const lobby = await Lobby.findById(req.params.id);
+    if (!lobby) {
+      return res.status(404).json({ message: 'Lobby not found' });
+    }
+
+    const success = lobby.togglePlayerReady(req.user._id);
+    if (!success) {
+      return res.status(400).json({ message: 'Failed to toggle ready state' });
+    }
+
+    await lobby.save();
+    res.json(toLeanLobby(lobby));
+  } catch (error) {
+    res.status(500).json({ message: 'Error toggling ready state', error });
   }
 };
 
 export const startGame = async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user?._id) {
-      return res.status(401).json({ error: 'User not authenticated' });
+    if (!req.user) {
+      return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    const lobby = await Lobby.findById(req.params.id) as PopulatedLobby;
-    
+    const lobby = await Lobby.findById(req.params.id);
     if (!lobby) {
-      return res.status(404).json({ error: 'Lobby not found' });
+      return res.status(404).json({ message: 'Lobby not found' });
     }
 
+    // Only host can start the game
     if (!lobby.host.equals(req.user._id)) {
-      return res.status(403).json({ error: 'Only host can start the game' });
+      return res.status(403).json({ message: 'Only host can start the game' });
     }
 
-    if (lobby.status !== 'waiting') {
-      return res.status(400).json({ error: 'Game already started' });
+    const success = lobby.startGame();
+    if (!success) {
+      return res.status(400).json({ message: 'Cannot start game' });
     }
 
-    if (lobby.currentPlayers.length < 2) {
-      return res.status(400).json({ error: 'Not enough players' });
-    }
-
-    lobby.status = 'playing';
     await lobby.save();
-
-    res.json(lobby);
+    res.json(toLeanLobby(lobby));
   } catch (error) {
-    res.status(400).json({ error: 'Failed to start game' });
+    res.status(500).json({ message: 'Error starting game', error });
+  }
+};
+
+export const endGame = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const lobby = await Lobby.findById(req.params.id);
+    if (!lobby) {
+      return res.status(404).json({ message: 'Lobby not found' });
+    }
+
+    // Only host can end the game
+    if (!lobby.host.equals(req.user._id)) {
+      return res.status(403).json({ message: 'Only host can end the game' });
+    }
+
+    lobby.endGame();
+    await lobby.save();
+    res.json(toLeanLobby(lobby));
+  } catch (error) {
+    res.status(500).json({ message: 'Error ending game', error });
   }
 }; 

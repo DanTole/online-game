@@ -4,7 +4,8 @@ import {
   getLobbies, 
   getLobby, 
   joinLobby, 
-  leaveLobby, 
+  leaveLobby,
+  toggleReady,
   startGame 
 } from '../controllers/lobbyController';
 import { auth } from '../middleware/auth';
@@ -19,6 +20,7 @@ router.get('/:id', getLobby);
 router.post('/', auth, createLobby);
 router.post('/:id/join', auth, joinLobby);
 router.post('/:id/leave', auth, leaveLobby);
+router.post('/:id/ready', auth, toggleReady);
 router.post('/:id/start', auth, startGame);
 
 export default router; 
