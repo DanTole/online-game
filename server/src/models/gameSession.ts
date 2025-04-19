@@ -1,62 +1,50 @@
-import mongoose, { Document, Schema, Types } from 'mongoose';
+import mongoose, { Schema, Document } from 'mongoose';
+import { IGameSession, IGameState, IGameEvent, IGameCommand } from '../types/game';
 
-export interface GameSessionDocument extends Document {
-  lobbyId: Types.ObjectId;
-  status: 'waiting' | 'playing' | 'finished';
-  players: {
-    userId: Types.ObjectId;
-    ready: boolean;
-    score: number;
-  }[];
-  currentTurn: number;
-  maxPlayers: number;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-const gameSessionSchema = new Schema<GameSessionDocument>(
-  {
-    lobbyId: {
-      type: Schema.Types.ObjectId,
-      ref: 'Lobby',
-      required: true,
-    },
-    status: {
-      type: String,
-      enum: ['waiting', 'playing', 'finished'],
-      default: 'waiting',
-    },
-    players: [{
-      userId: {
-        type: Schema.Types.ObjectId,
-        ref: 'User',
-        required: true,
-      },
-      ready: {
-        type: Boolean,
-        default: false,
-      },
-      score: {
-        type: Number,
-        default: 0,
-      },
-    }],
-    currentTurn: {
-      type: Number,
-      default: 0,
-    },
-    maxPlayers: {
-      type: Number,
-      required: true,
-    },
+const gameStateSchema = new Schema<IGameState>({
+  gameId: { type: String, required: true },
+  gameType: { type: String, required: true },
+  status: { 
+    type: String, 
+    enum: ['waiting', 'playing', 'paused', 'finished'],
+    default: 'waiting'
   },
-  {
-    timestamps: true,
-  }
-);
+  players: [{
+    userId: { type: String, required: true },
+    username: { type: String, required: true },
+    isReady: { type: Boolean, default: false },
+    isHost: { type: Boolean, default: false },
+    score: { type: Number, default: 0 },
+    playerData: { type: Schema.Types.Mixed, default: {} }
+  }],
+  spectators: [{ type: String }],
+  gameData: { type: Schema.Types.Mixed, default: {} }
+}, { timestamps: true });
 
-// Index for faster queries
-gameSessionSchema.index({ lobbyId: 1 });
-gameSessionSchema.index({ status: 1 });
+const gameEventSchema = new Schema<IGameEvent>({
+  type: { type: String, required: true },
+  timestamp: { type: Number, required: true },
+  playerId: { type: String },
+  data: { type: Schema.Types.Mixed, default: {} }
+});
 
-export const GameSession = mongoose.model<GameSessionDocument>('GameSession', gameSessionSchema); 
+const gameCommandSchema = new Schema<IGameCommand>({
+  type: { type: String, required: true },
+  playerId: { type: String, required: true },
+  timestamp: { type: Number, required: true },
+  data: { type: Schema.Types.Mixed, default: {} }
+});
+
+const gameSessionSchema = new Schema<IGameSession>({
+  gameType: { type: String, required: true },
+  state: gameStateSchema,
+  events: [gameEventSchema],
+  commands: [gameCommandSchema]
+}, { timestamps: true });
+
+// Indexes for faster queries
+gameSessionSchema.index({ 'state.gameId': 1 });
+gameSessionSchema.index({ 'state.players.userId': 1 });
+gameSessionSchema.index({ 'state.status': 1 });
+
+export const GameSession = mongoose.model<IGameSession>('GameSession', gameSessionSchema); 

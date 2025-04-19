@@ -23,10 +23,10 @@ export interface ILobby {
 }
 
 export interface LobbyMethods {
-  addPlayer(playerId: Types.ObjectId, username: string): Promise<void>;
-  removePlayer(playerId: Types.ObjectId): Promise<void>;
-  canJoin(playerId: Types.ObjectId, password?: string): boolean;
-  togglePlayerReady(playerId: Types.ObjectId): boolean;
+  addPlayer(playerId: string): Promise<void>;
+  removePlayer(playerId: string): Promise<void>;
+  canJoin(playerId: string, password?: string): boolean;
+  togglePlayerReady(playerId: string): boolean;
   startGame(): boolean;
   endGame(): void;
 }
@@ -52,29 +52,23 @@ const lobbySchema = new mongoose.Schema<ILobby, Model<ILobby, {}, LobbyMethods>>
   status: { type: String, enum: ['waiting', 'playing', 'finished'], default: 'waiting' },
 }, { timestamps: true });
 
-lobbySchema.methods.addPlayer = async function(this: LobbyDocument, playerId: Types.ObjectId, username: string) {
+lobbySchema.methods.addPlayer = async function(this: LobbyDocument, playerId: string) {
   if (this.players.length >= this.maxPlayers) {
     throw new Error('Lobby is full');
   }
-  if (this.players.some(id => id.equals(playerId))) {
+  if (this.players.some(id => id.toString() === playerId)) {
     throw new Error('Player already in lobby');
   }
-  this.players.push(playerId);
-  this.currentPlayers.push({
-    playerId,
-    username,
-    isReady: false,
-    joinedAt: new Date()
-  });
+  this.players.push(new Types.ObjectId(playerId));
   await this.save();
 };
 
-lobbySchema.methods.removePlayer = async function(this: LobbyDocument, playerId: Types.ObjectId) {
-  this.players = this.players.filter(id => !id.equals(playerId));
-  this.currentPlayers = this.currentPlayers.filter(p => !p.playerId.equals(playerId));
+lobbySchema.methods.removePlayer = async function(this: LobbyDocument, playerId: string) {
+  this.players = this.players.filter(id => id.toString() !== playerId);
+  this.currentPlayers = this.currentPlayers.filter(p => p.playerId.toString() !== playerId);
   if (this.players.length === 0) {
     await this.deleteOne();
-  } else if (this.host.equals(playerId) && this.players.length > 0) {
+  } else if (this.host.toString() === playerId && this.players.length > 0) {
     this.host = this.players[0];
     await this.save();
   } else {
@@ -82,18 +76,18 @@ lobbySchema.methods.removePlayer = async function(this: LobbyDocument, playerId:
   }
 };
 
-lobbySchema.methods.canJoin = function(this: LobbyDocument, playerId: Types.ObjectId, password?: string) {
+lobbySchema.methods.canJoin = function(this: LobbyDocument, playerId: string, password?: string) {
   if (this.isPrivate && this.password !== password) {
     return false;
   }
-  if (this.players.some(id => id.equals(playerId))) {
+  if (this.players.some(id => id.toString() === playerId)) {
     return false;
   }
   return this.players.length < this.maxPlayers;
 };
 
-lobbySchema.methods.togglePlayerReady = function(this: LobbyDocument, playerId: Types.ObjectId): boolean {
-  const player = this.currentPlayers.find(p => p.playerId.equals(playerId));
+lobbySchema.methods.togglePlayerReady = function(this: LobbyDocument, playerId: string): boolean {
+  const player = this.currentPlayers.find(p => p.playerId.toString() === playerId);
   if (!player) return false;
   player.isReady = !player.isReady;
   return true;
