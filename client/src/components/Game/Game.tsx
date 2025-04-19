@@ -12,6 +12,7 @@ interface GameState {
     username: string;
     score: number;
   }[];
+  validMoves: { row: number; col: number }[];
 }
 
 const Game: React.FC = () => {
@@ -21,7 +22,8 @@ const Game: React.FC = () => {
     board: Array(8).fill(null).map(() => Array(8).fill('')),
     currentPlayer: '',
     gameStatus: 'waiting',
-    players: []
+    players: [],
+    validMoves: []
   });
 
   useEffect(() => {
@@ -53,8 +55,18 @@ const Game: React.FC = () => {
 
   const handleMove = (row: number, col: number) => {
     if (socket && gameState.gameStatus === 'playing') {
-      socket.emit('game:move', { gameId, row, col });
+      const isValidMove = gameState.validMoves.some(
+        move => move.row === row && move.col === col
+      );
+      if (isValidMove) {
+        socket.emit('game:move', { gameId, row, col });
+      }
     }
+  };
+
+  const isCurrentPlayer = () => {
+    const userId = localStorage.getItem('userId');
+    return gameState.currentPlayer === userId;
   };
 
   return (
@@ -73,20 +85,27 @@ const Game: React.FC = () => {
       <div className="game-board">
         {gameState.board.map((row, rowIndex) => (
           <div key={rowIndex} className="board-row">
-            {row.map((cell, colIndex) => (
-              <div
-                key={`${rowIndex}-${colIndex}`}
-                className={`board-cell ${cell ? `piece-${cell}` : ''}`}
-                onClick={() => handleMove(rowIndex, colIndex)}
-              />
-            ))}
+            {row.map((cell, colIndex) => {
+              const isValidMove = gameState.validMoves.some(
+                move => move.row === rowIndex && move.col === colIndex
+              );
+              return (
+                <div
+                  key={`${rowIndex}-${colIndex}`}
+                  className={`board-cell ${cell ? `piece-${cell}` : ''} ${isValidMove ? 'valid-move' : ''}`}
+                  onClick={() => handleMove(rowIndex, colIndex)}
+                />
+              );
+            })}
           </div>
         ))}
       </div>
 
       <div className="game-status">
         {gameState.gameStatus === 'waiting' && 'Waiting for players...'}
-        {gameState.gameStatus === 'playing' && 'Game in progress'}
+        {gameState.gameStatus === 'playing' && (
+          isCurrentPlayer() ? 'Your turn' : 'Opponent\'s turn'
+        )}
         {gameState.gameStatus === 'finished' && 'Game finished'}
       </div>
     </div>
