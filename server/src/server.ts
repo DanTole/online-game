@@ -26,8 +26,13 @@ app.use('/api/queue', queueRoutes);
 const matchmakingService = MatchmakingService.getInstance();
 const webSocketServer = WebSocketServer.getInstance(httpServer);
 
+if (!process.env.MONGODB_URI) {
+  console.error('MONGODB_URI environment variable is required');
+  process.exit(1);
+}
+
 // Connect to MongoDB
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/game')
+mongoose.connect(process.env.MONGODB_URI)
   .then(() => {
     console.log('Connected to MongoDB');
     // Start matchmaking service
@@ -35,6 +40,7 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/game')
   })
   .catch((error) => {
     console.error('MongoDB connection error:', error);
+    process.exit(1);
   });
 
 // Start server
