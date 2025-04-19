@@ -1,0 +1,89 @@
+.game-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.game-info {
+  width: 100%;
+  margin-bottom: 20px;
+}
+
+.game-info h2 {
+  text-align: center;
+  color: #333;
+  margin-bottom: 10px;
+}
+
+.players {
+  display: flex;
+  justify-content: space-around;
+  margin-bottom: 20px;
+}
+
+.player {
+  padding: 10px;
+  border-radius: 5px;
+  background-color: #f0f0f0;
+  transition: all 0.3s ease;
+}
+
+.player.active {
+  background-color: #4CAF50;
+  color: white;
+}
+
+.game-board {
+  display: flex;
+  flex-direction: column;
+  border: 2px solid #333;
+  background-color: #4CAF50;
+  padding: 10px;
+  border-radius: 5px;
+}
+
+.board-row {
+  display: flex;
+}
+
+.board-cell {
+  width: 50px;
+  height: 50px;
+  border: 1px solid #333;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  background-color: #4CAF50;
+  transition: background-color 0.3s ease;
+}
+
+.board-cell:hover {
+  background-color: #45a049;
+}
+
+.piece-black {
+  background-color: #000;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+}
+
+.piece-white {
+  background-color: #fff;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+}
+
+.game-status {
+  margin-top: 20px;
+  padding: 10px;
+  background-color: #f0f0f0;
+  border-radius: 5px;
+  text-align: center;
+  width: 100%;
+} 
