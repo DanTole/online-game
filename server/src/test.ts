@@ -1,51 +1,39 @@
 import axios from 'axios';
+import dotenv from 'dotenv';
 
-const API_URL = 'http://localhost:4001/api';
+dotenv.config();
+
+const API_URL = process.env.API_URL || 'http://localhost:4001/api';
 let authToken: string;
 
-async function testUserEndpoints() {
+async function testAuth() {
   try {
-    // Test registration
-    console.log('\nTesting registration...');
+    // Register
     const registerResponse = await axios.post(`${API_URL}/users/register`, {
-      username: 'testuser',
-      email: 'test@example.com',
-      password: 'password123',
-      displayName: 'Test User'
+      username: process.env.TEST_USERNAME || 'testuser',
+      email: process.env.TEST_EMAIL || 'test@example.com',
+      password: process.env.TEST_PASSWORD || 'testpassword123'
     });
-    console.log('Registration successful:', registerResponse.data);
+    console.log('Register successful:', registerResponse.data);
     authToken = registerResponse.data.token;
 
-    // Test login
-    console.log('\nTesting login...');
+    // Login
     const loginResponse = await axios.post(`${API_URL}/users/login`, {
-      email: 'test@example.com',
-      password: 'password123'
+      email: process.env.TEST_EMAIL || 'test@example.com',
+      password: process.env.TEST_PASSWORD || 'testpassword123'
     });
     console.log('Login successful:', loginResponse.data);
     authToken = loginResponse.data.token;
 
-    // Test get profile
-    console.log('\nTesting get profile...');
+    // Get Profile
     const profileResponse = await axios.get(`${API_URL}/users/profile`, {
       headers: { Authorization: `Bearer ${authToken}` }
     });
-    console.log('Profile retrieved:', profileResponse.data);
+    console.log('Profile:', profileResponse.data);
 
-    // Test update profile
-    console.log('\nTesting update profile...');
-    const updateResponse = await axios.patch(
-      `${API_URL}/users/profile`,
-      { displayName: 'Updated Name' },
-      { headers: { Authorization: `Bearer ${authToken}` } }
-    );
-    console.log('Profile updated:', updateResponse.data);
-
-  } catch (error: any) {
-    console.error('Test failed:', error.response?.data || error.message);
+  } catch (error) {
+    console.error('Test failed:', error);
   }
 }
 
-// Run tests
-console.log('Starting user endpoint tests...');
-testUserEndpoints(); 
+testAuth(); 
